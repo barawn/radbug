@@ -414,6 +414,8 @@ int ctrlb(int argc, char **argv) {
 }
 
 int decode(int argc, char **argv) {
+  uint8_t ctrlval;
+  
   argc--;
   argv++;
   if (!argc) {
