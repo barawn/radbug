@@ -14,3 +14,7 @@ RADBUGv2 has
 * an Arduino Pro Mini 8 MHz 3.3V (program with Arduino IDE through DLP-2232H)
 
 No SPLD on the RADBUGv2, they sucked
+
+# CPU details
+
+ATmega328p 3.3V 8 MHz
