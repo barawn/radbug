@@ -3,6 +3,17 @@
 /////////////////////////////////////////////////////////////////////
 //
 // NO MORE GREENPAK
+
+// hey look ATMegas have internal EEPROMs! who knew!
+#include <EEPROM.h>
+
+// 'K'
+#define KEY             0x4B
+#define KEY_ADDR        0x00
+#define DFL_EN_ADDR     0x01
+#define DFL_CTRLA_ADDR  0x02
+#define DFL_CTRLB_ADDR  0x03
+
 #define CTRLA_B 9
 #define CTRLB_B 2
 
@@ -39,8 +50,16 @@
 
 #define DEFAULT_EN_A 1
 #define DEFAULT_EN_B 0
+#define DEFAULT_EN_A_MASK 0x1
+#define DEFAULT_EN_B_MASK 0x2
+#define DEFAULT_ENABLE ((DEFAULT_EN_B << 1) | DEFAULT_EN_A)
+uint8_t default_en;
+
 uint8_t A_is_enabled = 0;
 uint8_t B_is_enabled = 0;
+
+uint8_t default_ctrlA;
+uint8_t default_ctrlB;
 
 #define DEFAULT_CTRL_A 0x81
 #define DEFAULT_CTRL_B 0x81
@@ -75,15 +94,15 @@ void setup_B(bool val) {
 // the LED is on LED_BUILTIN
 #include "cmdArduino.h"
 
-void PrintStatusA() {
+void PrintStatusA(uint8_t val) {
   Serial.print(F("Connector A: "));
-  if (A_is_enabled) Serial.println(F("ENABLED"));
+  if (val) Serial.println(F("ENABLED"));
   else Serial.println(F("DISABLED"));
 }
 
-void PrintStatusB() {
+void PrintStatusB(uint8_t val) {
   Serial.print(F("Connector B: "));
-  if (B_is_enabled) Serial.println(F("ENABLED"));
+  if (val) Serial.println(F("ENABLED"));
   else Serial.println(F("DISABLED"));
 }
 
@@ -105,7 +124,17 @@ void PrintSlot(uint8_t ctrlval) {
         Serial.println(F(": OFF"));
       }
     }
+    ctrlval = ctrlval >> 1;
   }
+}
+
+void PrintFullStatus(uint8_t enA, uint8_t enB, uint8_t ctrlA, uint8_t ctrlB) {
+  PrintStatusA(enA);
+  Serial.print(F("CTRLA: "));
+  Serial.println(ctrlA, HEX);
+  PrintStatusB(enB);
+  Serial.print(F("CTRLB: "));
+  Serial.println(ctrlB, HEX);
 }
 
 int status(int argc, char **argv) {
@@ -113,13 +142,7 @@ int status(int argc, char **argv) {
   // like "Connector A: ENABLED"
   // like "Connector A CTRL: 0x"
   // etc.
-  PrintStatusA();
-  Serial.print(F("CTRLA: "));
-  Serial.println(ctrlA_copy, HEX);
-  PrintStatusB();
-  Serial.print(F("CTRLB: "));
-  Serial.println(ctrlB_copy, HEX);
-
+  PrintFullStatus( A_is_enabled, B_is_enabled, ctrlA_copy, ctrlB_copy);
   return 0;
 }
 
@@ -133,7 +156,7 @@ int seta(int argc, char **argv) {
   }
   rv = strtoul(*argv, NULL, 0);
   setup_A(rv);
-  PrintStatusA();
+  PrintStatusA(A_is_enabled);
   // if 0 enable A and print status A
   // like Connector A: ENABLED or DISABLED
   return 0;
@@ -149,7 +172,7 @@ int setb(int argc, char **argv) {
   }
   rv = strtoul(*argv, NULL, 0);
   setup_B(rv);
-  PrintStatusB();
+  PrintStatusB(B_is_enabled);
   // same as above
   return 0;
 }
@@ -248,6 +271,53 @@ int decode(int argc, char **argv) {
   return 0;
 }
 
+int printdefault(int argc, char **argv) {
+  PrintFullStatus( default_en & DEFAULT_EN_A_MASK,
+                   default_en & DEFAULT_EN_B_MASK,
+                   default_ctrlA,
+                   default_ctrlB);
+  return 0;                   
+}
+
+int savedefault(int argc, char **argv) {
+  uint8_t en_val = 0;
+  if (A_is_enabled) en_val |= DEFAULT_EN_A_MASK;
+  if (B_is_enabled) en_val |= DEFAULT_EN_B_MASK;
+  EEPROM.write(DFL_EN_ADDR, en_val);
+  EEPROM.write(DFL_CTRLA_ADDR, ctrlA_copy);
+  EEPROM.write(DFL_CTRLB_ADDR, ctrlB_copy);
+  default_en = en_val;
+  default_ctrlA = ctrlA_copy;
+  default_ctrlB = ctrlB_copy;
+  PrintFullStatus( default_en & DEFAULT_EN_A_MASK,
+                   default_en & DEFAULT_EN_B_MASK,
+                   default_ctrlA,
+                   default_ctrlB);
+
+  return 0;
+}
+
+void applyDefaults() {
+  if (default_en & DEFAULT_EN_A_MASK) A_is_enabled = 1;
+  else A_is_enabled = 0;
+  if (default_en & DEFAULT_EN_B_MASK) B_is_enabled = 1;
+  else B_is_enabled = 0;
+  setup_A(A_is_enabled);
+  setup_B(B_is_enabled);
+  
+  clockControl(default_ctrlA, CTRLA_B);
+  ctrlA_copy = default_ctrlA;
+  clockControl(default_ctrlB, CTRLB_B);
+  ctrlB_copy = default_ctrlB;
+  return 0;
+}
+
+int loaddefault(int argc, char **argv) {
+  applyDefaults();
+  PrintFullStatus( A_is_enabled, B_is_enabled, ctrlA_copy, ctrlB_copy);
+  return 0;
+}
+
 int help(int argc, char **argv) {
   Serial.println(F("RADBUGv2 COMMANDS:"));
   Serial.println(F("a 0/1 : turns on (1) or off (0) connector A"));
@@ -257,6 +327,9 @@ int help(int argc, char **argv) {
   Serial.println(F("status : prints out the current crate config status"));
   Serial.println(F("blink : blinks the Arduino LED"));
   Serial.println(F("decode # : prints out what the ctrl value # means"));
+  Serial.println(F("default : print current defaults"));
+  Serial.println(F("save : store current values as the defaults"));
+  Serial.println(F("load : reload default values"));
 }
 
 int led_blink(int argc, char **argv) {
@@ -266,6 +339,22 @@ int led_blink(int argc, char **argv) {
 }
 
 void setup() {
+  // defaulty-defaulty
+  if (EEPROM.read(KEY_ADDR) != KEY) {
+    default_en = DEFAULT_ENABLE;
+    default_ctrlA = DEFAULT_CTRL_A;
+    default_ctrlB = DEFAULT_CTRL_B;
+    // never been programmed
+    EEPROM.write(KEY_ADDR, KEY);
+    EEPROM.write(DFL_EN_ADDR, DEFAULT_ENABLE);
+    EEPROM.write(DFL_CTRLA_ADDR, DEFAULT_CTRL_A);
+    EEPROM.write(DFL_CTRLB_ADDR, DEFAULT_CTRL_B);
+  } else {
+    default_en = EEPROM.read(DFL_EN_ADDR);
+    default_ctrlA = EEPROM.read(DFL_CTRLA_ADDR);
+    default_ctrlB = EEPROM.read(DFL_CTRLB_ADDR);
+  }
+  
   pinMode(LED_BUILTIN, OUTPUT);
   pinMode(ARD_TCK, OUTPUT);
   digitalWrite(ARD_TCK, 0);
@@ -283,13 +372,7 @@ void setup() {
 
   jtagSelect(0);  
 
-  setup_A(DEFAULT_EN_A);
-  setup_B(DEFAULT_EN_B);
-
-  clockControl(DEFAULT_CTRL_A, CTRLA_B);
-  ctrlA_copy = DEFAULT_CTRL_A;
-  clockControl(DEFAULT_CTRL_B, CTRLB_B);
-  ctrlB_copy = DEFAULT_CTRL_B;
+  applyDefaults();
 
   digitalWrite(LED_BUILTIN, HIGH); // turns off LED
   // put your setup code here, to run once:
@@ -303,6 +386,9 @@ void setup() {
   cmd.add("ctrla", ctrla);
   cmd.add("ctrlb", ctrlb);
   cmd.add("decode", decode);
+  cmd.add("default", printdefault);
+  cmd.add("save", savedefault);
+  cmd.add("load", loaddefault);
 }
 
 void loop() {
